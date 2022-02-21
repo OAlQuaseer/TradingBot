@@ -1,9 +1,17 @@
 
 import logging
 import time
+from connectors.binance_enums import *
+from enums import *
 
-from models import Contract, Candle
+from threading import Timer
+
+from models import *
 import typing
+
+# due to circular import issue
+if typing.TYPE_CHECKING:
+    from connectors.binance_futures import BinanceFuturesClient
 
 logger = logging.getLogger()
 
@@ -11,8 +19,9 @@ TF_EQUIV = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 1440
 
 
 class Strategy:
-    def __init__(self, client, contract: Contract, exchange: str, time_frame: str, balance_percentage: float,
-                 take_profit: float, stop_loss: float):
+    def __init__(self, client: typing.Union["BinanceFuturesClient"], contract: Contract, exchange: str, time_frame: str,
+                 balance_percentage: float, take_profit: float, stop_loss: float,strategy_name : str):
+
         self.client = client
         self.contract = contract
         self.exchange = exchange
@@ -21,9 +30,17 @@ class Strategy:
         self.balance_percentage = balance_percentage
         self.take_profit = take_profit
         self.stop_loss = stop_loss
+        self.strategy_name = strategy_name
 
-        self.open_position = False
+        self.ongoing_position = False
         self.candles: typing.List[Candle] = []
+        self.trades: typing.List[Trade] = []
+
+        self.logs = list()
+
+    def add_log(self, message: str):
+        logger.info(message)
+        self.logs.append({'message': message, 'displayed': False})
 
     # there are three cases here. The incoming aggregated market information would (represented by a trade info)
     # 1- update the current candle (the last index in this list self.candles)
@@ -106,17 +123,61 @@ class Strategy:
 
     # we can place an order without a bid and ask price by placing a market order
     # however if we need the bid and ask price we can pass them as arguments from the connector
-    def open_position_with_market_order(self, signal_result: int):
-        pass
+    def open_position_with_market_order(self, signal_result: PositionSide):
+        trade_size = self.client.get_trade_size(self.contract, self.candles[-1].close, self.balance_percentage)
+        if trade_size is None:
+            return
+        self.add_log(f'{signal_result.name} signal triggered on {self.contract.symbol} with {self.time_frame} time frame '
+                     f'and trade size: {trade_size}')
+
+        side = OrderSide.BUY if signal_result is PositionSide.LONG else OrderSide.SELL
+        order_status = self.client.place_order(contract=self.contract,
+                                                   side=side,
+                                                   quantity=trade_size,
+                                                   order_type=OrderType.MARKET)
+        self.add_log(f'{side.name} order placed on {self.exchange} | Status: {order_status.status}')
+        self.ongoing_position = True
+
+        average_filled_price = None
+        if order_status.status is OrderStatus.FILLED:
+            average_filled_price = order_status.avg_price
+        elif order_status.status is OrderStatus.PARTIALLY_FILLED:
+            timer = Timer(2.0, lambda: self._check_order_status(order_status.order_id))
+            timer.start()
+
+        new_trade = Trade(time=int(time.time() * 1000), contract=self.contract, strategy=self.strategy_name, side=side,
+                          entry_price=average_filled_price, quantity=trade_size, entry_id=order_status.order_id,
+                          pnl=0, status=TradeStatus.OPEN)
+        self.trades.append(new_trade)
+
+
+
+
+
+
+
+
 
     def open_position_with_limit_order(self, signal_result: int, bid: float, ask: float):
         pass
 
+    def _check_order_status(self, order_id: int):
+        order_status = self.client.get_order_status(self.contract, order_id)
+        if order_status is not None and order_id == order_status.order_id:
+            logger.info(f'{self.exchange} order Status: {order_status.status}')
+            if order_status.status is OrderStatus.FILLED:
+                for trade in self.trades:
+                    if trade.entry_id == order_status.order_id :
+                        trade.entry_price = order_status.avg_price
+                        break
+                return
+        timer = Timer(2.0, lambda: self._check_order_status(order_id))
+        timer.start()
 
 class TechnicalStrategy(Strategy):
     def __init__(self, client, contract: Contract, exchange: str, time_frame: str, balance_percentage: float,
                  take_profit: float, stop_loss: float, other_params: typing.Dict):
-        super().__init__(client, contract, exchange, time_frame, balance_percentage, take_profit, stop_loss)
+        super().__init__(client, contract, exchange, time_frame, balance_percentage, take_profit, stop_loss, 'Technical')
         self._ema_fast = other_params['ema_fast']
         self._ema_slow = other_params['ema_slow']
         self._ema_signal = other_params['ema_signal']
@@ -129,18 +190,20 @@ class TechnicalStrategy(Strategy):
 class BreakoutStrategy(Strategy):
     def __init__(self, client, contract: Contract, exchange: str, time_frame: str, balance_percentage: float,
                  take_profit: float, stop_loss: float, other_params: typing.Dict):
-        super().__init__(client, contract, exchange, time_frame, balance_percentage, take_profit, stop_loss)
+        super().__init__(client, contract, exchange, time_frame, balance_percentage, take_profit, stop_loss, 'Breakout')
         self._min_volume = other_params['min_volume']
         logger.info(f'Activated breakout strategy for {contract.symbol}')
 
     # to determine if we need to enter a long trade or short trade or do nothing
-    def _check_signal(self) -> int:
+    def _check_signal(self) -> typing.Union[PositionSide, None]:
         if self.candles[-1].close > self.candles[-2].high and self.candles[-1].volume > self._min_volume:
-            return 1
+            #Long trade
+            return PositionSide.LONG
         elif self.candles[-1].close < self.candles[-2].low and self.candles[-1].volume > self._min_volume:
-            return -1
+            #Short trade
+            return PositionSide.SHORT
         else:
-            return 0
+            return None
 
     def _check_inside_bar_pattern(self):
         if self.candles[-2].high < self.candles[-3].high and self.candles[-2].low > self.candles[-3].low:
@@ -152,9 +215,9 @@ class BreakoutStrategy(Strategy):
                 logger.info(f"Downside breakout pattern circumstances have been met")
 
     def check_trade(self, tick_type: str):
-        if not self.open_position:
+        if not self.ongoing_position:
             signal_result = self._check_signal()
-            if signal_result in [1, -1]:
+            if signal_result in [PositionSide.LONG, PositionSide.SHORT]:
                 self.open_position_with_market_order(signal_result)
 
 

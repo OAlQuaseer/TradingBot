@@ -1,4 +1,7 @@
 from utilities import *
+from connectors.binance_enums import *
+from enums import *
+
 
 # it is referred to it in the udemy class as Balance
 class Asset:
@@ -38,8 +41,23 @@ class Contract:
         self.tick_size = 1 / pow(10, raw_data['pricePrecision'])
         self.lot_size = 1 / pow(10, raw_data['quantityPrecision'])
 
-class OrderStatus:
+
+class OrderStatusResponse:
     def __init__(self, raw_data):
         self.avg_price = float(raw_data["avgPrice"])
-        self.status = raw_data['status']
+        self.status: OrderStatus = OrderStatus[raw_data['status']]
         self.order_id = raw_data['orderId']
+
+
+class Trade:
+    def __init__(self, time: int, contract: Contract, strategy: str, side: OrderSide, entry_price: float,
+                 status: TradeStatus, pnl: float, quantity, entry_id):
+        self.time: int = time
+        self.contract: Contract = contract
+        self.strategy: str = strategy
+        self.side: OrderSide = side
+        self.entry_price: float = entry_price
+        self.status: TradeStatus = status
+        self.pnl: float = pnl
+        self.quantity = quantity
+        self.entry_id = entry_id

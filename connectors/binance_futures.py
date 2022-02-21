@@ -10,6 +10,7 @@ import json
 import typing
 
 from strategies import Strategy, TechnicalStrategy, BreakoutStrategy
+from connectors.binance_enums import *
 
 from models import *
 
@@ -129,7 +130,7 @@ class BinanceFuturesClient:
                 balances[asset.asset_name] = asset
         return balances
 
-    def get_order_status(self, contract: Contract, order_id: int) -> OrderStatus:
+    def get_order_status(self, contract: Contract, order_id: int) -> OrderStatusResponse:
         logger.info('get_order_status method called')
         params = dict()
         headers = dict()
@@ -140,10 +141,10 @@ class BinanceFuturesClient:
         params['signature'] = self.generate_signature(params)
         order_status = self._make_http_request('GET', '/fapi/v1/order', params=params, headers=headers)
         if order_status is not None:
-            return OrderStatus(order_status)
+            return OrderStatusResponse(order_status)
 
-    def place_order(self, contract: Contract, side: str, quantity: float, order_type: str, price=None,
-                    time_in_force=None) -> OrderStatus:
+    def place_order(self, contract: Contract, side: OrderSide, quantity: float, order_type: OrderType, price=None,
+                    time_in_force: typing.Union[TimeInForce, None] = None) -> OrderStatusResponse:
         logger.info(f'{self.place_order.__name__} method called')
 
         params = dict()
@@ -151,24 +152,24 @@ class BinanceFuturesClient:
         headers['X-MBX-APIKEY'] = self.public_api_key
         params['timestamp'] = int(time.time() * 1000)
         params['symbol'] = contract.symbol
-        params['side'] = side
+        params['side'] = side.name
         params['quantity'] = round(round(quantity / contract.lot_size) * contract.lot_size, 8)
-        params['type'] = order_type
+        params['type'] = order_type.name
 
         if price is not None:
             params['price'] = round(round(price / contract.tick_size) * contract.tick_size, 8)
 
         if time_in_force is not None:
-            params['timeInForce'] = time_in_force
+            params['timeInForce'] = time_in_force.name
 
         params['signature'] = self.generate_signature(params)
 
         place_order_status = self._make_http_request('POST', '/fapi/v1/order', params=params, headers=headers)
 
         if place_order_status is not None:
-            return OrderStatus(place_order_status)
+            return OrderStatusResponse(place_order_status)
 
-    def cancel_order(self, contract: Contract, order_id: int) -> OrderStatus:
+    def cancel_order(self, contract: Contract, order_id: int) -> OrderStatusResponse:
         logger.info('cancel_order method called')
         params = dict()
         headers = dict()
@@ -179,7 +180,7 @@ class BinanceFuturesClient:
         params['signature'] = self.generate_signature(params)
         cancel_order_response = self._make_http_request('DELETE', '/fapi/v1/order', params=params, headers=headers)
         if cancel_order_response is not None:
-            return OrderStatus(cancel_order_response)
+            return OrderStatusResponse(cancel_order_response)
 
     def start_ws_connection(self):
         websocket.enableTrace(False)
