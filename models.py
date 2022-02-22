@@ -31,7 +31,7 @@ class Candle:
 
 
 class Contract:
-    def __init__(self, raw_data):
+    def __init__(self, raw_data, exchange: Exchanges):
         self.symbol = raw_data["symbol"]
         self.pair = raw_data['pair']
         self.base_asset = raw_data['baseAsset']
@@ -40,6 +40,7 @@ class Contract:
         self.quantity_decimals = raw_data["quantityPrecision"]  # please do not use it as stepSize
         self.tick_size = 1 / pow(10, raw_data['pricePrecision'])
         self.lot_size = 1 / pow(10, raw_data['quantityPrecision'])
+        self.exchange: Exchanges = exchange
 
 
 class OrderStatusResponse:

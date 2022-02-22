@@ -12,6 +12,7 @@ from interface.strategy_component import StrategyEditor
 
 logger = logging.getLogger()
 
+
 class Root(tkinter.Tk):
     def __init__(self, binance_futures_client: BinanceFuturesClient):
         super().__init__()
@@ -32,11 +33,11 @@ class Root(tkinter.Tk):
                                                              , self._left_frame, bg=BG_COLOR)
         self._watchlist_component_frame.pack(side=tkinter.TOP)
 
-        # self._trades_watchlist_component_frame = TradesWatchListComponent(self._right_frame, bg=BG_COLOR)
-        # self._trades_watchlist_component_frame.pack(side=tkinter.TOP)
-
         self._strategy_editor = StrategyEditor(self, binance_futures_client, self._right_frame, bg=BG_COLOR)
         self._strategy_editor.pack(side=tkinter.TOP)
+
+        self._trades_watchlist_component_frame = TradesWatchListComponent(self._right_frame, bg=BG_COLOR)
+        self._trades_watchlist_component_frame.pack(side=tkinter.TOP)
 
         self._update_ui()
 
@@ -46,6 +47,26 @@ class Root(tkinter.Tk):
             if not log['displayed']:
                 self.logging_frame.add_log(log['log'])
                 log['displayed'] = True
+
+        # updating the Trades component and the logging component
+
+        for client in [self.binance_futures_client]:
+            try:
+                for key, strategy in client.strategies.items():
+                    for log in strategy.logs:
+                        if log['displayed'] is False:
+                            self.logging_frame.add_log(log['message'])
+                            log['displayed'] = True
+
+                    for trade in strategy.trades:
+                        if trade.time not in self._trades_watchlist_component_frame.body_widgets['symbol'].keys():
+                            self._trades_watchlist_component_frame.add_trade(trade)
+                        else:
+                            self._trades_watchlist_component_frame.update_trade(trade)
+
+            except RuntimeError as e:
+                logger.error("Error while looping through strategies dictionary: %s", e)
+
 
         # updating the watchlist component
         try:

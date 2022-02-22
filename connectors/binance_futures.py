@@ -63,14 +63,13 @@ class BinanceFuturesClient:
     # str ---> like BTCUSDT. its the symbol in the contract object
     # Contract model ---> Contract object
     def get_contracts(self) -> typing.Dict[str, Contract]:
-        logger.info('get_contracts method called')
-        logger.info('getting the contracts')
+        logger.info(f'{self.get_contracts.__name__} method called')
         exchange_info = self._make_http_request('GET', '/fapi/v1/exchangeInfo')
         contracts = dict()
         if exchange_info is not None:
             symbols_list = exchange_info['symbols']
             for symbol in symbols_list:
-                contracts[symbol['symbol']] = Contract(symbol)
+                contracts[symbol['symbol']] = Contract(symbol, Exchanges.BINANCE)
             return contracts
 
     def get_bid_ask_price(self, contract: Contract) -> typing.Dict[str, float]:
@@ -210,6 +209,20 @@ class BinanceFuturesClient:
                 else:
                     self.prices[symbol]['ask'] = float(data['a'])
                     self.prices[symbol]['bid'] = float(data['b'])
+
+                # PNL Calculation
+                try:
+                    for key, strategy in self.strategies.items():
+                        if strategy.contract.symbol == symbol:
+                            for trade in strategy.trades:
+                                if trade.status is TradeStatus.OPEN and trade.entry_price is not None:
+                                    if trade.side is OrderSide.BUY:
+                                        trade.pnl = (self.prices[symbol]['bid'] - trade.entry_price) * trade.quantity
+                                    elif trade.side is OrderSide.SELL:
+                                        trade.pnl = (trade.entry_price - self.prices[symbol]['ask']) * trade.quantity
+                except RuntimeError as e:
+                    logger.error("Error while updating the PNL calculations: %s", e)
+
             elif data['e'] == 'aggTrade':
                 symbol = data['s']
                 for key, strategy in self.strategies.items():

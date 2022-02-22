@@ -38,7 +38,7 @@ class Strategy:
 
         self.logs = list()
 
-    def add_log(self, message: str):
+    def _add_log(self, message: str):
         logger.info(message)
         self.logs.append({'message': message, 'displayed': False})
 
@@ -127,7 +127,7 @@ class Strategy:
         trade_size = self.client.get_trade_size(self.contract, self.candles[-1].close, self.balance_percentage)
         if trade_size is None:
             return
-        self.add_log(f'{signal_result.name} signal triggered on {self.contract.symbol} with {self.time_frame} time frame '
+        self._add_log(f'{signal_result.name} signal triggered on {self.contract.symbol} with {self.time_frame} time frame '
                      f'and trade size: {trade_size}')
 
         side = OrderSide.BUY if signal_result is PositionSide.LONG else OrderSide.SELL
@@ -135,13 +135,13 @@ class Strategy:
                                                    side=side,
                                                    quantity=trade_size,
                                                    order_type=OrderType.MARKET)
-        self.add_log(f'{side.name} order placed on {self.exchange} | Status: {order_status.status}')
+        self._add_log(f'{side.name} order placed on {self.exchange} | Status: {order_status.status}')
         self.ongoing_position = True
 
         average_filled_price = None
         if order_status.status is OrderStatus.FILLED:
             average_filled_price = order_status.avg_price
-        elif order_status.status is OrderStatus.PARTIALLY_FILLED:
+        elif order_status.status is OrderStatus.PARTIALLY_FILLED or OrderStatus.NEW:
             timer = Timer(2.0, lambda: self._check_order_status(order_status.order_id))
             timer.start()
 
@@ -164,10 +164,10 @@ class Strategy:
     def _check_order_status(self, order_id: int):
         order_status = self.client.get_order_status(self.contract, order_id)
         if order_status is not None and order_id == order_status.order_id:
-            logger.info(f'{self.exchange} order Status: {order_status.status}')
+            logger.info(f'{self.exchange} order Status: {order_status.status.name}')
             if order_status.status is OrderStatus.FILLED:
                 for trade in self.trades:
-                    if trade.entry_id == order_status.order_id :
+                    if trade.entry_id == order_status.order_id:
                         trade.entry_price = order_status.avg_price
                         break
                 return
