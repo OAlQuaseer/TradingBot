@@ -72,6 +72,10 @@ class Strategy:
             logger.info(f'Last candle updated in the list of candles for %s with timeframe %s', self.contract.symbol,
                         self.time_frame)
 
+            # Check Take profit / Stop loss
+            for trade in self.trades:
+                if trade.status is TradeStatus.OPEN and trade.entry_price is not None:
+                    self._check_tp_sl(trade)
             return 'same_candle'
 
 
@@ -150,11 +154,41 @@ class Strategy:
                           pnl=0, status=TradeStatus.OPEN)
         self.trades.append(new_trade)
 
+    def _check_tp_sl(self, trade: Trade):
+        tp_triggered = False
+        sl_triggered = False
 
+        price = self.candles[-1].close
+        if trade.side is OrderSide.BUY:
+            if self.stop_loss is not None:
+                if price <= trade.entry_price * (1 - self.stop_loss/100):
+                    sl_triggered = True
+            if self.take_profit is not None:
+                if price >= trade.entry_price * (1 + self.take_profit/100):
+                    tp_triggered = True
 
+        elif trade.side is OrderSide.SELL:
+            if self.stop_loss is not None:
+                if price >= trade.entry_price * (1 + self.stop_loss/100):
+                    sl_triggered = True
+            if self.take_profit is not None:
+                if price <= trade.entry_price * (1 - self.take_profit/100):
+                    tp_triggered = True
 
+        if tp_triggered or sl_triggered:
+            self._add_log(f"{'Stop loss' if sl_triggered else 'Take profit'} for {self.contract.symbol} {self.time_frame}")
 
+        order_side = OrderSide.BUY if trade.side is OrderSide.SELL else OrderSide.SELL
 
+        order_status = self.client.place_order(contract=self.contract,
+                                               side=order_side,
+                                               quantity=trade.quantity,
+                                               order_type=OrderType.MARKET)
+        #TODO... needs work and attention
+        if order_status is not None:
+            self._add_log(f"Exit order on {self.contract.symbol} {self.time_frame} placed successfully")
+            trade.status = TradeStatus.CLOSED.name
+            self.ongoing_position = False
 
 
 
@@ -173,6 +207,7 @@ class Strategy:
                 return
         timer = Timer(2.0, lambda: self._check_order_status(order_id))
         timer.start()
+
 
 class TechnicalStrategy(Strategy):
     def __init__(self, client, contract: Contract, exchange: str, time_frame: str, balance_percentage: float,

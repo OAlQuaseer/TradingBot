@@ -80,6 +80,8 @@ class TradesWatchListComponent(tkinter.Frame):
                                                              textvariable=self.body_widgets['pnl_var'][time_index],
                                                                 bg=BG_COLOR, fg=FG_COLOR_2, font=GLOBAL_FONT)
         self.body_widgets['pnl'][time_index].grid(row=body_widgets_index, column=7)
+
+        self.body_widgets_index += 1
         return
 
     def update_trade(self, trade: Trade):

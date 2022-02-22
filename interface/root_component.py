@@ -95,6 +95,6 @@ class Root(tkinter.Tk):
         except RuntimeError as e:
             logger.error("Error while looping through watchlist dictionary: %s", e)
 
-        self.after(1000, self._update_ui)
+        self.after(2000, self._update_ui)
 
 
